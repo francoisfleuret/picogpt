@@ -65,6 +65,8 @@ class QKVAttention(nn.Module):
         a = F.dropout(a, self.dropout, self.training)
         y = torch.einsum("nhts,nhsd->nthd", a, v).flatten(2)
 
+        y = y @ self.w_o
+
         return y
 
 
