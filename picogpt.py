@@ -43,18 +43,22 @@ class QKVAttention(nn.Module):
 
         self.causal = causal
         self.dropout = dropout
+        self.nb_heads = nb_heads
+        self.dim_qk = dim_qk
 
-        self.w_q = randw(nb_heads, dim_qk, dim_in)
-        self.w_k = randw(nb_heads, dim_qk, dim_in)
-        self.w_v = randw(nb_heads, dim_v, dim_in)
-        self.w_o = randw(dim_v * nb_heads, dim_in)
+        self.w_qkv = nn.Linear(dim_in, nb_heads * (2 * dim_qk + dim_v), bias=False)
+        self.w_o = nn.Linear(dim_v * nb_heads, dim_in, bias=False)
 
     def forward(self, input):
-        q = torch.einsum("ntc,hdc->nhtd", input, self.w_q)
-        k = torch.einsum("ntc,hdc->nhtd", input, self.w_k)
-        v = torch.einsum("ntc,hdc->nhtd", input, self.w_v)
+        qkv = self.w_qkv(input).reshape(input.size(0), input.size(1), self.nb_heads, -1)
 
-        a = torch.einsum("nhtd,nhsd->nhts", q, k) / math.sqrt(self.w_q.size(1))
+        q, k, v = (
+            qkv[..., : self.dim_qk],
+            qkv[..., self.dim_qk : 2 * self.dim_qk],
+            qkv[..., 2 * self.dim_qk :],
+        )
+
+        a = torch.einsum("nthd,nshd->nhts", q, k) / math.sqrt(self.dim_qk)
 
         if self.causal:
             t = torch.arange(input.size(1), device=q.device)
@@ -63,9 +67,9 @@ class QKVAttention(nn.Module):
 
         a = a.softmax(dim=3)
         a = F.dropout(a, self.dropout, self.training)
-        y = torch.einsum("nhts,nhsd->nthd", a, v).flatten(2)
+        y = torch.einsum("nhts,nshd->nthd", a, v).flatten(2)
 
-        y = y @ self.w_o
+        y = self.w_o(y)
 
         return y
 
